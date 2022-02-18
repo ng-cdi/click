@@ -18,6 +18,7 @@
 
 #include <click/config.h>
 #include "iprewriter.hh"
+#include "minionrewriter.hh"
 #include <clicknet/ip.h>
 #include <clicknet/tcp.h>
 #include <clicknet/udp.h>
@@ -42,9 +43,13 @@ IPRewriter::cast(const char *n)
 {
     if (strcmp(n, "IPRewriterBase") == 0)
 	return (IPRewriterBase *)this;
-    else if (strcmp(n, "TCPRewriter") == 0)
+    else if (strcmp(n, "TCPRewriter") == 0) {
+        this->_is_minnion = 0;
 	return (TCPRewriter *)this;
-    else if (strcmp(n, "IPRewriter") == 0)
+    } else if (strcmp(n, "MinionRewriter") == 0) {
+        this->_is_minnion = 1;
+        return (MinionRewriter *)this;
+    } else if (strcmp(n, "IPRewriter") == 0)
 	return this;
     else
 	return 0;
@@ -70,15 +75,20 @@ IPRewriter::configure(Vector<String> &conf, ErrorHandler *errh)
     _udp_timeouts[1] *= CLICK_HZ;
     _udp_streaming_timeout *= CLICK_HZ; // IPRewriterBase handles the others
 
-    return TCPRewriter::configure(conf, errh);
+    if (_is_minnion)
+        return MinionRewriter::configure(conf, errh);
+    else
+        return TCPRewriter::configure(conf, errh);
 }
 
 inline IPRewriterEntry *
 IPRewriter::get_entry(int ip_p, const IPFlowID &flowid, int input)
 {
-    if (ip_p == IP_PROTO_TCP)
-	return TCPRewriter::get_entry(ip_p, flowid, input);
-    if (ip_p != IP_PROTO_UDP)
+    if (ip_p == IP_PROTO_TCP && this->_is_minnion)
+        return MinionRewriter::get_entry(ip_p, flowid, input);
+    else if (ip_p == IP_PROTO_TCP && this->_is_minnion == 0)
+        return TCPRewriter::get_entry(ip_p, flowid, input);
+    else if (ip_p != IP_PROTO_UDP)
 	return 0;
     IPRewriterEntry *m = _udp_map.get(flowid);
     if (!m && (unsigned) input < (unsigned) _input_specs.size()) {
@@ -94,8 +104,11 @@ IPRewriterEntry *
 IPRewriter::add_flow(int ip_p, const IPFlowID &flowid,
 		     const IPFlowID &rewritten_flowid, int input)
 {
-    if (ip_p == IP_PROTO_TCP)
+    if (ip_p == IP_PROTO_TCP && this->_is_minnion == 0)
 	return TCPRewriter::add_flow(ip_p, flowid, rewritten_flowid, input);
+    if (ip_p == IP_PROTO_TCP && this->_is_minnion)
+	return MinionRewriter::add_flow(ip_p, flowid, rewritten_flowid, input);
+
 
     void *data;
     if (!(data = _udp_allocator.allocate()))
@@ -190,5 +203,5 @@ IPRewriter::add_handlers()
 }
 
 CLICK_ENDDECLS
-ELEMENT_REQUIRES(TCPRewriter UDPRewriter)
+ELEMENT_REQUIRES(TCPRewriter UDPRewriter MinionRewriter)
 EXPORT_ELEMENT(IPRewriter)

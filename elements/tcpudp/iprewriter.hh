@@ -1,6 +1,7 @@
 #ifndef CLICK_IPREWRITER_HH
 #define CLICK_IPREWRITER_HH
 #include "tcprewriter.hh"
+#include "minionrewriter.hh"
 #include "udprewriter.hh"
 CLICK_DECLS
 class UDPRewriter;
@@ -216,7 +217,7 @@ flow and returns in the same format.  Otherwise, returns nothing.
 =a TCPRewriter, IPAddrRewriter, IPAddrPairRewriter, IPRewriterPatterns,
 RoundRobinIPMapper, FTPPortMapper, ICMPRewriter, ICMPPingRewriter */
 
-class IPRewriter : public TCPRewriter { public:
+class IPRewriter : public MinionRewriter { public:
 
     typedef UDPRewriter::UDPFlow UDPFlow;
 
@@ -257,6 +258,7 @@ class IPRewriter : public TCPRewriter { public:
     SizedHashAllocator<sizeof(UDPFlow)> _udp_allocator;
     uint32_t _udp_timeouts[2];
     uint32_t _udp_streaming_timeout;
+    uint32_t _is_minnion;
 
     int udp_flow_timeout(const UDPFlow *mf) const {
 	if (mf->streaming())
