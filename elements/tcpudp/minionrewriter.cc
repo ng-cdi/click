@@ -26,6 +26,7 @@
 #include <click/args.hh>
 #include <click/straccum.hh>
 #include <click/error.hh>
+#include <ostream>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -279,6 +280,8 @@ int MinionRewriter::configure(Vector<String> &conf, ErrorHandler *errh)
 	String host = String(""), state_file = String("");
 	bool dst_anno = true, has_reply_anno = false;
 	int reply_anno;
+    IPFlowID in_flow, out_flow;
+    std::string str_flow;
 
 	if (Args(this, errh).bind(conf).read("TCP_NODATA_TIMEOUT", SecondsArg(), _timeouts[0]).read("TCP_GUARANTEE", SecondsArg(), _timeouts[1]).read("TIMEOUT", SecondsArg(), _tcp_data_timeout).read("TCP_TIMEOUT", SecondsArg(), _tcp_data_timeout).read("TCP_DONE_TIMEOUT", SecondsArg(), _tcp_done_timeout).read("DST_ANNO", dst_anno).read("REPLY_ANNO", AnnoArg(1), reply_anno).read_status(has_reply_anno).read("LOG_HOST", StringArg(), host).read("STATE", StringArg(), state_file).consume() < 0)
 		return -1;
@@ -310,35 +313,39 @@ int MinionRewriter::configure(Vector<String> &conf, ErrorHandler *errh)
 	if (state_file.compare(String("")) != 0)
 	{
 		std::ifstream fin(state_file.c_str());
-		std::string str_flow;
 
 		if (fin)
 		{
 			while (std::getline(fin, str_flow))
-			{
-				std::istringstream ss(str_flow);
-				char delim;
-				IPFlowID in_flow, out_flow;
-				std::string local_saddr, remote_saddr, remote_daddr;
-				int local_sport, remote_sport, remote_dport, input, foutput, routput;
-
-				std::getline(ss, local_saddr, ':') >> local_sport >> delim;
-				std::getline(ss, remote_saddr, ':') >> remote_sport >> delim;
-				std::getline(ss, remote_daddr, ':') >> remote_dport >> delim;
-				ss >> input >> delim >> foutput >> delim >> routput >> delim;
-				in_flow = IPFlowID(IPAddress(local_saddr.c_str()), htons(local_sport), IPAddress(remote_daddr.c_str()), htons(remote_dport));
-				out_flow = IPFlowID(IPAddress(remote_saddr.c_str()), htons(remote_sport), IPAddress(remote_daddr.c_str()), htons(remote_dport));
-				_input_specs[input].foutput = foutput;
-				_input_specs[input].routput = routput;
-
-				this->add_flow(IP_PROTO_TCP, in_flow, out_flow, 0);
-			}
+                this->process_flow(str_flow);
 		}
 		else
 			click_chatter("Failed to read state from %s", state_file.c_str());
 	}
 	return ret;
 }
+
+int
+MinionRewriter::process_flow(std::string str_flow){
+    IPFlowID in_flow, out_flow;
+    std::istringstream ss(str_flow);
+    char delim;
+    std::string local_saddr, remote_saddr, remote_daddr;
+    int local_sport, remote_sport, remote_dport, input, foutput, routput;
+
+    std::getline(ss, local_saddr, ':') >> local_sport >> delim;
+    std::getline(ss, remote_saddr, ':') >> remote_sport >> delim;
+    std::getline(ss, remote_daddr, ':') >> remote_dport >> delim;
+    ss >> input >> delim >> foutput >> delim >> routput >> delim;
+    in_flow = IPFlowID(IPAddress(local_saddr.c_str()), htons(local_sport), IPAddress(remote_daddr.c_str()), htons(remote_dport));
+    out_flow = IPFlowID(IPAddress(remote_saddr.c_str()), htons(remote_sport), IPAddress(remote_daddr.c_str()), htons(remote_dport));
+    _input_specs[input].foutput = foutput;
+    printf("routpur read %d %d\n", routput, _input_specs[input].routput);
+    _input_specs[input].routput = routput;
+    this->add_flow(IP_PROTO_TCP, in_flow, out_flow, 0);
+    return 0;
+}
+
 
 IPRewriterEntry *
 MinionRewriter::add_flow(int /*ip_p*/, const IPFlowID &flowid,
@@ -353,17 +360,17 @@ MinionRewriter::add_flow(int /*ip_p*/, const IPFlowID &flowid,
 		   rewritten_flowid.saddr().unparse().c_str(), ntohs(rewritten_flowid.sport()),
 		   rewritten_flowid.daddr().unparse().c_str(), ntohs(rewritten_flowid.dport()));
 
-	sprintf(_buf, "rewritten_flow:%s:%d:%s:%d:%s:%d\n",
-			flowid.saddr().unparse().c_str(), flowid.sport(),
-			rewritten_flowid.saddr().unparse().c_str(), rewritten_flowid.sport(),
-			rewritten_flowid.daddr().unparse().c_str(), rewritten_flowid.dport());
+	sprintf(_buf, "rewritten_flow: %s:%d:%s:%d:%s:%d:%s:%d\n",
+		   flowid.saddr().unparse().c_str(), ntohs(flowid.sport()),
+		   flowid.daddr().unparse().c_str(), ntohs(flowid.dport()),
+		   rewritten_flowid.saddr().unparse().c_str(), ntohs(rewritten_flowid.sport()),
+		   rewritten_flowid.daddr().unparse().c_str(), ntohs(rewritten_flowid.dport()));
 
 	sendto(_logfd, (const char *)_buf, strlen(_buf),
 		   MSG_CONFIRM, (const struct sockaddr *)&_servaddr,
 		   sizeof(_servaddr));
 
-	printf("input: %d fouput %d routput %d\n", input, _input_specs[input].foutput, _input_specs[input].routput);
-	TCPFlow *flow = new (data) TCPFlow(&_input_specs[input], flowid, rewritten_flowid,
+    TCPFlow *flow = new (data) TCPFlow(&_input_specs[input], flowid, rewritten_flowid,
 									   !!_timeouts[1], click_jiffies() + relevant_timeout(_timeouts));
 
 	return store_flow(flow, input, _map);
@@ -393,11 +400,9 @@ void MinionRewriter::push(int port, Packet *p_in)
 		IPRewriterInput &is = _input_specs.unchecked_at(port);
 		IPFlowID rewritten_flowid = IPFlowID::uninitialized_t();
 		int result = is.rewrite_flowid(flowid, rewritten_flowid, p);
-		printf("Add new flow %d %d\n", is.kind, result );
 		if (result == rw_addmap)
 		{
 			m = MinionRewriter::add_flow(IP_PROTO_TCP, flowid, rewritten_flowid, port);
-			printf("Add new flow\n");
 		}
 		if (!m)
 		{
@@ -435,13 +440,25 @@ MinionRewriter::tcp_mappings_handler(Element *e, void *)
 	return sa.take_string();
 }
 
+int
+MinionRewriter::add_flow_handler(const String &data, Element *e, void *, ErrorHandler *err)
+{
+	MinionRewriter *rw = (MinionRewriter *)e;
+    std::cout << data.c_str() << std::endl;
+    rw->process_flow(data.c_str());
+    return 0;
+}
+
 int MinionRewriter::tcp_lookup_handler(int, String &str, Element *e, const Handler *, ErrorHandler *errh)
 {
 	MinionRewriter *rw = (MinionRewriter *)e;
 	IPAddress saddr, daddr;
 	unsigned short sport, dport;
 
-	if (Args(rw, errh).push_back_words(str).read_mp("SADDR", saddr).read_mp("SPORT", IPPortArg(IP_PROTO_TCP), sport).read_mp("DADDR", daddr).read_mp("DPORT", IPPortArg(IP_PROTO_TCP), dport).complete() < 0)
+	if (Args(rw, errh).push_back_words(str).read_mp("SADDR", saddr).
+            read_mp("SPORT", IPPortArg(IP_PROTO_TCP), sport).
+            read_mp("DADDR", daddr).
+            read_mp("DPORT", IPPortArg(IP_PROTO_TCP), dport).complete() < 0)
 		return -1;
 
 	HashContainer<IPRewriterEntry> *map = rw->get_map(IPRewriterInput::mapid_default);
@@ -467,6 +484,8 @@ void MinionRewriter::add_handlers()
 {
 	add_read_handler("table", tcp_mappings_handler, 0);
 	add_read_handler("mappings", tcp_mappings_handler, 0, Handler::h_deprecated);
+	add_write_handler("addFlow", add_flow_handler, 0);
+    printf("adding addFlow handler\n");
 	set_handler("lookup", Handler::OP_READ | Handler::READ_PARAM, tcp_lookup_handler, 0);
 	add_rewriter_handlers(true);
 }

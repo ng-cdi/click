@@ -3,6 +3,7 @@
 #include "elements/tcpudp/tcprewriter.hh"
 #include "elements/ip/iprwmapping.hh"
 #include <clicknet/tcp.h>
+#include <string>
 CLICK_DECLS
 
 /*
@@ -131,7 +132,7 @@ class MinionRewriter : public TCPRewriter { public:
 
 	void unparse(StringAccum &sa, bool direction, click_jiffies_t now) const;
 
-      private:
+     private:
 
 	struct delta_transition {
 	    int32_t delta[2];
@@ -171,6 +172,7 @@ class MinionRewriter : public TCPRewriter { public:
 
     void push(int, Packet *);
 
+    int process_flow(std::string);
     void add_handlers() CLICK_COLD;
 
  protected:
@@ -195,6 +197,8 @@ class MinionRewriter : public TCPRewriter { public:
 
     static String tcp_mappings_handler(Element *, void *);
     static int tcp_lookup_handler(int, String &str, Element *e, const Handler *h, ErrorHandler *errh);
+    static int add_flow_handler(const String &data,
+            Element*, void*, ErrorHandler *);
 
 };
 
