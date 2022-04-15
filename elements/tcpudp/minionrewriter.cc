@@ -354,22 +354,6 @@ MinionRewriter::add_flow(int /*ip_p*/, const IPFlowID &flowid,
 	void *data;
 	if (!(data = _allocator.allocate()))
 		return 0;
-	printf("rewritten_flow: %s:%d:%s:%d:%s:%d:%s:%d\n",
-		   flowid.saddr().unparse().c_str(), ntohs(flowid.sport()),
-		   flowid.daddr().unparse().c_str(), ntohs(flowid.dport()),
-		   rewritten_flowid.saddr().unparse().c_str(), ntohs(rewritten_flowid.sport()),
-		   rewritten_flowid.daddr().unparse().c_str(), ntohs(rewritten_flowid.dport()));
-
-	sprintf(_buf, "rewritten_flow: %s:%d:%s:%d:%s:%d:%s:%d\n",
-		   flowid.saddr().unparse().c_str(), ntohs(flowid.sport()),
-		   flowid.daddr().unparse().c_str(), ntohs(flowid.dport()),
-		   rewritten_flowid.saddr().unparse().c_str(), ntohs(rewritten_flowid.sport()),
-		   rewritten_flowid.daddr().unparse().c_str(), ntohs(rewritten_flowid.dport()));
-
-	sendto(_logfd, (const char *)_buf, strlen(_buf),
-		   MSG_CONFIRM, (const struct sockaddr *)&_servaddr,
-		   sizeof(_servaddr));
-
     TCPFlow *flow = new (data) TCPFlow(&_input_specs[input], flowid, rewritten_flowid,
 									   !!_timeouts[1], click_jiffies() + relevant_timeout(_timeouts));
 
@@ -402,7 +386,23 @@ void MinionRewriter::push(int port, Packet *p_in)
 		int result = is.rewrite_flowid(flowid, rewritten_flowid, p);
 		if (result == rw_addmap)
 		{
-			m = MinionRewriter::add_flow(IP_PROTO_TCP, flowid, rewritten_flowid, port);
+            printf("rewritten_flow:%s:%d:%s:%d:%s:%d:%s:%d\n",
+                    flowid.saddr().unparse().c_str(), ntohs(flowid.sport()),
+                    flowid.daddr().unparse().c_str(), ntohs(flowid.dport()),
+                    rewritten_flowid.saddr().unparse().c_str(), ntohs(rewritten_flowid.sport()),
+                    rewritten_flowid.daddr().unparse().c_str(), ntohs(rewritten_flowid.dport()));
+
+            sprintf(_buf, "rewritten_flow:%s:%d:%s:%d:%s:%d:%s:%d\n",
+                    flowid.saddr().unparse().c_str(), ntohs(flowid.sport()),
+                    flowid.daddr().unparse().c_str(), ntohs(flowid.dport()),
+                    rewritten_flowid.saddr().unparse().c_str(), ntohs(rewritten_flowid.sport()),
+                    rewritten_flowid.daddr().unparse().c_str(), ntohs(rewritten_flowid.dport()));
+
+            sendto(_logfd, (const char *)_buf, strlen(_buf),
+                    MSG_CONFIRM, (const struct sockaddr *)&_servaddr,
+                    sizeof(_servaddr));
+
+            m = MinionRewriter::add_flow(IP_PROTO_TCP, flowid, rewritten_flowid, port);
 		}
 		if (!m)
 		{
